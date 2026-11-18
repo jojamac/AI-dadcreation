@@ -1,0 +1,7 @@
+git+https://github.com/myshell-ai/OpenVoice.git
+gradio
+torch
+torchaudio
+# You might need to add:
+# melotts
+# nltk

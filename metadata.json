@@ -1,0 +1,5 @@
+{
+  "name": "Generador de Anuncios con IA",
+  "description": "Una aplicación para crear anuncios de video a partir de imágenes publicitarias utilizando IA para extracción de texto y generación de voz y video.",
+  "requestFramePermissions": []
+}

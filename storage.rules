@@ -1,0 +1,10 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /{allPaths=**} {
+      // Acceso público de lectura y escritura sin autenticación
+      allow read, write: if true;
+    }
+  }
+}
+

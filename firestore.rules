@@ -1,0 +1,15 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Acceso público permanente sin autenticación para las colecciones de la app
+    match /voices/{voiceId} {
+      allow read, write: if true;
+    }
+
+    match /assets/{assetId} {
+      allow read, write: if true;
+    }
+  }
+}
+
