@@ -112,13 +112,28 @@ const Step5ViewResult: React.FC<Step5ViewResultProps> = ({ images, audioUrl, onR
   useEffect(() => {
     videoRefs.current.forEach((vEl, idx) => {
       if (!vEl) return;
-      if (idx === currentImageIndex && isPlaying) {
-        vEl.play().catch(() => {});
+      if (idx === currentImageIndex) {
+        let segStart = 0;
+        if (stitchedAudio) {
+          for (let i = 0; i < idx; i++) {
+            segStart += stitchedAudio.durations[i] || 0;
+          }
+        }
+        const audioCurrentTime = audioRef.current?.currentTime || 0;
+        const clipTime = Math.max(0, audioCurrentTime - segStart);
+        const maxTime = Math.max(0, (vEl.duration || 10) - 0.05);
+        const targetTime = Math.min(clipTime, maxTime);
+        if (Math.abs(vEl.currentTime - targetTime) > 0.25) {
+          vEl.currentTime = targetTime;
+        }
+        if (isPlaying) {
+          vEl.play().catch(() => {});
+        }
       } else {
         vEl.pause();
       }
     });
-  }, [currentImageIndex, isPlaying]);
+  }, [currentImageIndex, isPlaying, stitchedAudio]);
 
   // The actual source we play
   const activeAudioUrl = audioUrl || stitchedAudio?.url || undefined;
@@ -152,16 +167,32 @@ const Step5ViewResult: React.FC<Step5ViewResultProps> = ({ images, audioUrl, onR
         // Sequential Timing Logic
         let accumulatedTime = 0;
         let foundIndex = images.length - 1; // Default to last
+        let segStart = 0;
 
         for (let i = 0; i < stitchedAudio.durations.length; i++) {
-          accumulatedTime += stitchedAudio.durations[i];
-          // If current time is within this segment
-          if (currentTime < accumulatedTime) {
+          const segDuration = stitchedAudio.durations[i];
+          if (currentTime < accumulatedTime + segDuration) {
             foundIndex = stitchedAudio.imageIndices ? stitchedAudio.imageIndices[i] : i;
+            segStart = accumulatedTime;
             break;
           }
+          accumulatedTime += segDuration;
         }
         setCurrentImageIndex(foundIndex);
+
+        // Keep active video synchronized with audio time
+        const vEl = videoRefs.current[foundIndex];
+        if (vEl) {
+          const clipTime = Math.max(0, currentTime - segStart);
+          const maxTime = Math.max(0, (vEl.duration || 10) - 0.05);
+          const targetTime = Math.min(clipTime, maxTime);
+          if (Math.abs(vEl.currentTime - targetTime) > 0.35) {
+            vEl.currentTime = targetTime;
+          }
+          if (isPlaying && vEl.paused) {
+            vEl.play().catch(() => {});
+          }
+        }
 
       } else {
         // Simple Linear Logic (Pre-recorded single file)
@@ -296,6 +327,7 @@ const Step5ViewResult: React.FC<Step5ViewResultProps> = ({ images, audioUrl, onR
     if (!audio) return;
     if (isPlaying) {
       audio.pause();
+      videoRefs.current.forEach(v => v?.pause());
     } else {
       audio.playbackRate = playbackSpeed;
       audio.play().catch(console.error);
@@ -309,6 +341,9 @@ const Step5ViewResult: React.FC<Step5ViewResultProps> = ({ images, audioUrl, onR
     audio.currentTime = 0;
     setCurrentImageIndex(0);
     setProgress(0);
+    videoRefs.current.forEach(v => {
+      if (v) v.currentTime = 0;
+    });
     audio.play().catch(console.error);
   };
 
@@ -323,7 +358,30 @@ const Step5ViewResult: React.FC<Step5ViewResultProps> = ({ images, audioUrl, onR
 
     // Set time
     if (audio.duration) {
-      audio.currentTime = percentage * audio.duration;
+      const targetTime = percentage * audio.duration;
+      audio.currentTime = targetTime;
+
+      if (stitchedAudio) {
+        let acc = 0;
+        let found = images.length - 1;
+        let segStart = 0;
+        for (let i = 0; i < stitchedAudio.durations.length; i++) {
+          const d = stitchedAudio.durations[i];
+          if (targetTime < acc + d) {
+            found = stitchedAudio.imageIndices ? stitchedAudio.imageIndices[i] : i;
+            segStart = acc;
+            break;
+          }
+          acc += d;
+        }
+        setCurrentImageIndex(found);
+        const vEl = videoRefs.current[found];
+        if (vEl) {
+          const clipTime = Math.max(0, targetTime - segStart);
+          const maxTime = Math.max(0, (vEl.duration || 10) - 0.05);
+          vEl.currentTime = Math.min(clipTime, maxTime);
+        }
+      }
     }
   };
 
@@ -620,31 +678,14 @@ const Step5ViewResult: React.FC<Step5ViewResultProps> = ({ images, audioUrl, onR
         });
       }
 
-      const audioCtx = new AudioContext({ sampleRate: 44100 });
+      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
 
       setRecordingProgress(3);
       setStatusText("Descargando audio...");
       const response = await fetch(audioEl.src);
       const arrayBuffer = await response.arrayBuffer();
       const audioData = await audioCtx.decodeAudioData(arrayBuffer);
-
-      setRecordingProgress(5);
-      setStatusText("Normalizando audio...");
-
-      const offlineCtx = new OfflineAudioContext(
-        2,
-        audioData.duration * 44100,
-        44100
-      );
-
-      const offlineSource = offlineCtx.createBufferSource();
-      offlineSource.buffer = audioData;
-      offlineSource.connect(offlineCtx.destination);
-      offlineSource.start();
-
-      const renderedBuffer = await offlineCtx.startRendering();
-
-      setRecordingProgress(10);
+      audioCtx.close().catch(() => {});
 
       setRecordingProgress(15);
       setStatusText("Renderizando video de alta calidad (Offline Muxer)...");

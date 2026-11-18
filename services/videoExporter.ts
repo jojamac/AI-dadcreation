@@ -337,6 +337,43 @@ async function exportSequenceWithVideos(
         ctx.restore();
     };
 
+    // Helper para buscar fotograma de video de forma segura y fiable
+    const seekVideo = (v: HTMLVideoElement, targetTime: number): Promise<void> => {
+        return new Promise((resolve) => {
+            const vDuration = Number.isFinite(v.duration) && v.duration > 0 ? v.duration : 10;
+            const clampedTarget = Math.max(0, Math.min(targetTime, vDuration - 0.04));
+
+            if (Math.abs(v.currentTime - clampedTarget) < 0.015 && !v.seeking) {
+                resolve();
+                return;
+            }
+
+            let resolved = false;
+            const done = () => {
+                if (!resolved) {
+                    resolved = true;
+                    v.removeEventListener('seeked', onSeeked);
+                    v.removeEventListener('error', onError);
+                    resolve();
+                }
+            };
+
+            const onSeeked = () => done();
+            const onError = () => done();
+
+            v.addEventListener('seeked', onSeeked, { once: true });
+            v.addEventListener('error', onError, { once: true });
+
+            setTimeout(done, 250);
+
+            try {
+                v.currentTime = clampedTarget;
+            } catch {
+                done();
+            }
+        });
+    };
+
     // 5. Renderizar cuadros
     const transitionFrames = selectedTransition && selectedTransition !== 'Ninguna' ? Math.round(fps * 0.5) : 0;
 
@@ -353,13 +390,10 @@ async function exportSequenceWithVideos(
         ctx.fillStyle = 'black';
         ctx.fillRect(0, 0, width, height);
 
-        // Si es video, ajustar su tiempo
+        // Si es video, ajustar su tiempo de forma fluida y sincronizada
         if (currentMedia.type === 'video') {
             const v = currentMedia.element as HTMLVideoElement;
-            v.currentTime = Math.min(elapsedInSeg, (v.duration || 10) - 0.05);
-            if (v.seeking) {
-                await new Promise<void>(r => { v.onseeked = () => r(); setTimeout(r, 40); });
-            }
+            await seekVideo(v, elapsedInSeg);
         }
 
         // Verificar si estamos en zona de transición al siguiente segmento
@@ -375,7 +409,7 @@ async function exportSequenceWithVideos(
             const nextMedia = loadedMedia[segIdx + 1];
             if (nextMedia.type === 'video') {
                 const nextV = nextMedia.element as HTMLVideoElement;
-                nextV.currentTime = 0;
+                await seekVideo(nextV, 0);
             }
             drawMedia(nextMedia.element, nextMedia.width, nextMedia.height, progress);
         } else {
@@ -424,12 +458,12 @@ async function exportSequenceWithVideos(
     }
 
     const totalSamples = channels[0].length;
-    const samplesPerChunk = 44100;
+    const samplesPerChunk = audioBuffer.sampleRate;
 
     for (let offset = 0; offset < totalSamples; offset += samplesPerChunk) {
         if (encoderError) throw encoderError;
         const length = Math.min(samplesPerChunk, totalSamples - offset);
-        const timestamp = (offset / audioBuffer.sampleRate) * 1_000_000;
+        const timestamp = Math.round((offset / audioBuffer.sampleRate) * 1_000_000);
 
         const planarBuffer = new Float32Array(length * channels.length);
         for (let c = 0; c < channels.length; c++) {

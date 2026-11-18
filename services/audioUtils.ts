@@ -64,7 +64,7 @@ export async function stitchAudioBlobs(
     items: (string | AudioStitchItem)[]
 ): Promise<{ url: string, durations: number[] }> {
     const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-    const sampleRate = 44100;
+    const sampleRate = audioCtx.sampleRate;
     const defaultChannels = 2;
 
     const audioBuffers: AudioBuffer[] = [];
@@ -100,7 +100,7 @@ export async function stitchAudioBlobs(
         return { url: '', durations: [] };
     }
 
-    const numberOfChannels = audioBuffers[0]?.numberOfChannels || 2;
+    const numberOfChannels = audioBuffers.reduce((max, buf) => Math.max(max, buf.numberOfChannels), 1) || 2;
     const resultBuffer = audioCtx.createBuffer(numberOfChannels, totalLength, sampleRate);
 
     let offset = 0;
